@@ -1,0 +1,16 @@
+---
+log:
+  level: debug
+checks:
+  - name: Failing HTTP check
+    type: http
+    cron: "0/10 * * * * *"
+    config:
+      url: https://google.com/kasjdhkasjddh
+      error_http_status_codes:
+        - 404
+  - name: Simple HTTP check
+    type: http
+    cron: "0/10 * * * * *"
+    config:
+      url: https://google.com
