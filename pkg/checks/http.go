@@ -2,108 +2,136 @@ package checks
 
 import (
 	"bytes"
+	"context"
 	"fmt"
 	"io/ioutil"
 	"net/http"
 	"net/url"
+
+	"github.com/amitizle/muffin/internal/logger"
+	"github.com/mitchellh/mapstructure"
+	"github.com/rs/zerolog"
 )
 
 // TODO
 // * Use jsonpath notation to verify status based on JSON path in the response (https://github.com/tidwall/gjson)
 // * on all config, use better option method, i.e sending an `Option` type to the new struct creation.
+// * Support configuring headers (such as auth headers)
 
 // HTTPCheck is a struct that defines the HTTP check.
-// It holds the HTTP client (that will be configured with oauth2/simple auth)
-// as well as the url (`*url.URL`), HTTP method, payload (body data) and `errorHTTPStatusCodes` (= the
-// status codes that will be considered as errornous in the check)
+// It holds the HTTP client and an HTTPCheckConfig struct.
 type HTTPCheck struct {
-	client               *http.Client
-	url                  *url.URL
-	method               string
-	payload              []byte
-	errorHTTPStatusCodes map[int]bool
+	client *http.Client
+	config *HTTPCheckConfig
+	ctx    context.Context
+	logger zerolog.Logger
 }
 
-// NewHTTPCheck returns a new Check that implements simple HTTP check.
-// It receives an `*http.Client` struct as an argument.
-// If the passed `*http.Client` is `nil` then it will use the
-// default HTTP client (`*http.DefaultClient`).
-func NewHTTPCheck(httpClient *http.Client) *HTTPCheck {
-	var checkClient *http.Client
-	if httpClient == nil {
-		checkClient = http.DefaultClient
-	} else {
-		checkClient = httpClient
-	}
-	c := &HTTPCheck{
-		client:               checkClient,
-		method:               http.MethodGet,
-		errorHTTPStatusCodes: map[int]bool{},
-	}
-	c.useDefaultErrorCodes()
-	return c
+// HTTPCheckConfig is a struct that holds the configuration required for the HTTP check.
+// It is populated with `mapstructure` and holds some private fields that suppose to
+// hold a parsed/verified version of the configuration input.
+type HTTPCheckConfig struct {
+	URL                  string `mapstructure:"url"`
+	Method               string `mapstructure:"method"`
+	Payload              []byte `mapstructure:"payload"`
+	ErrorHTTPStatusCodes []int  `mapstructure:"error_http_status_codes"`
+
+	// private fields
+	errorHTTPStatusCodesMap map[int]bool
+	parsedURL               *url.URL
 }
 
-func (check *HTTPCheck) useDefaultErrorCodes() {
+// useDefaultErrorCodes populated an HTTPCheckConfig's HTTP error codes
+// with default ones (400 - 599)
+func (checkConfig *HTTPCheckConfig) useDefaultErrorCodes() {
 	for i := 400; i < 600; i++ {
 		if http.StatusText(i) != "" {
-			check.errorHTTPStatusCodes[i] = true
+			checkConfig.errorHTTPStatusCodesMap[i] = true
 		}
 	}
 }
 
+// Initialize initializing an HTTP client for the HTTPCheck.
+func (check *HTTPCheck) Initialize(ctx context.Context) error {
+	check.client = http.DefaultClient
+	check.ctx = ctx
+	lg, err := logger.GetContext(ctx)
+	if err != nil {
+		return err
+	}
+	check.logger = lg
+	return nil
+}
+
+// Configure decodes map[string]interface{} to an HTTPCheckConfig struct instance.
+// It does so using `mapstructure`.
+// After decoding, it configures some default values in case they were not given in
+// the configuration.
+func (check *HTTPCheck) Configure(config map[string]interface{}) error {
+	httpConfig := &HTTPCheckConfig{
+		errorHTTPStatusCodesMap: map[int]bool{},
+	}
+	if err := mapstructure.Decode(config, httpConfig); err != nil {
+		return err
+	}
+	u, err := url.ParseRequestURI(httpConfig.URL)
+	if err != nil {
+		return err
+	}
+	httpConfig.parsedURL = u
+
+	if httpConfig.ErrorHTTPStatusCodes != nil {
+		for _, errStatusCode := range httpConfig.ErrorHTTPStatusCodes {
+			httpConfig.errorHTTPStatusCodesMap[errStatusCode] = true
+		}
+	} else {
+		httpConfig.useDefaultErrorCodes()
+	}
+
+	if httpConfig.Method == "" {
+		httpConfig.Method = http.MethodHead
+	}
+
+	if httpConfig.Payload == nil {
+		httpConfig.Payload = []byte{}
+	}
+
+	check.config = httpConfig
+	return nil
+}
+
 // Run runs the HTTP check
 func (check *HTTPCheck) Run() ([]byte, error) {
-	req, err := http.NewRequest(check.method, check.url.String(), bytes.NewBuffer(check.payload))
+	check.logger.Debug().Msg("running check")
+	req, err := http.NewRequest(check.config.Method, check.config.parsedURL.String(), bytes.NewBuffer(check.config.Payload))
 	if err != nil {
+		check.logger.Error().Err(err).Msg("check encountered an error")
 		return []byte{}, err
 	}
 
 	resp, err := check.client.Do(req)
+	// if resp is not nil it means that the HTTP request failed, however the
+	// check itself should be reporting an error, thus we won't return nil
 	if err != nil && resp == nil {
+		check.logger.Error().Err(err).Msg("check encountered an error")
 		return []byte{}, err
 	}
 
 	defer resp.Body.Close()
 	body, err := ioutil.ReadAll(resp.Body)
 	if err != nil {
+		check.logger.Error().Err(err).Msg("check encountered an error")
 		return []byte{}, err
 	}
 
-	if check.errorHTTPStatusCodes[resp.StatusCode] {
+	if check.config.errorHTTPStatusCodesMap[resp.StatusCode] {
 		return body, fmt.Errorf(resp.Status)
 	}
 
 	return body, nil
 }
 
-// SetErrorStatusCodes sets the HTTP status codes that'll fail the check.
-// For example, if calling `SetErrorStatusCodes([]int{500, 503})` will make the
-// check only return `error` (= fail) when getting one of those HTTP statuses back.
-func (check *HTTPCheck) SetErrorStatusCodes(codes []int) error {
-	badHTTPCodes := []int{}
-	for _, statusCode := range codes {
-		if statusCode < 100 || statusCode > 599 {
-			badHTTPCodes = append(badHTTPCodes, statusCode)
-			continue
-		}
-		check.errorHTTPStatusCodes[statusCode] = true
-	}
-	if len(badHTTPCodes) > 0 {
-		return fmt.Errorf("bad http codes: %v", badHTTPCodes)
-	}
-	return nil
-}
-
-// SetURL sets the URL to which the HTTP check will make the HTTP request.
-// It receives a `*url.URL` struct, it's the responsibility of the user of
-// this check to build this struct.
-func (check *HTTPCheck) SetURL(u *url.URL) error {
-	check.url = u
-	return nil
-}
-
 // GetFullURL returns the string represantation of the check's URL
 func (check *HTTPCheck) GetFullURL() string {
-	return check.url.String()
+	return check.config.parsedURL.String()
 }
