@@ -1,0 +1,50 @@
+version: 2.1
+jobs:
+  build:
+    parameters:
+      goos:
+        description: GOOS variable (see go tool dist list)
+        default: linux
+        type: string
+      goarch:
+        description: GOARCH (see go tool dist list)
+        default: amd64
+        type: string
+    docker:
+      - image: circleci/golang:1.13
+    steps:
+      - checkout
+      - run:
+          name: compile
+          command: make build
+  test:
+    docker:
+      - image: circleci/golang:1.13
+    steps:
+      - checkout
+      - run:
+          name: unit tests
+          command: make test
+
+workflows:
+  version: 2
+  build:
+    jobs:
+      - build:
+          name: build_linux_amd64
+          goos: linux
+          goarch: amd64
+      - build:
+          name: build_linux_arm64
+          goos: linux
+          goarch: arm64
+      - build:
+          name: build_darwin_amd64
+          goos: darwin
+          goarch: amd64
+      - build:
+          name: build_windows_amd64
+          goos: windows
+          goarch: amd64
+      - test:
+          name: test_muffin
