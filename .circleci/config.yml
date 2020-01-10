@@ -18,7 +18,9 @@ jobs:
           name: compile
           command: |
             echo "Building with GOOS=<< parameters.goos >> / GOARCH=<< parameters.goarch >>"
-            "GOOS=<< parameters.goos >> GOARCH=<< parameters.goarch >> make build"
+            export GOOS="<< parameters.goos >>"
+            export GOARCH="<< parameters.goarch >>"
+            make build
   test:
     docker:
       - image: circleci/golang:1.13
