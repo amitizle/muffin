@@ -3,8 +3,6 @@ module github.com/amitizle/muffin
 go 1.13
 
 require (
-	github.com/docker/distribution v2.7.1+incompatible
-	github.com/gorilla/mux v1.7.3 // indirect
 	github.com/mitchellh/go-homedir v1.1.0
 	github.com/mitchellh/mapstructure v1.1.2
 	github.com/robfig/cron/v3 v3.0.0
