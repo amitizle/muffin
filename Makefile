@@ -30,3 +30,9 @@ test:
 
 clean:
 	@rm -f $(BINARY)
+
+modules-tidy:
+	@go mod tidy
+
+modules-update:
+	@go get -u ./...
