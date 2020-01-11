@@ -63,7 +63,9 @@ func initializeChecks(s *scheduler.Scheduler) error {
 			if err != nil {
 				log.Error().Err(err).Msg("failed check")
 				for _, notifier := range cfg.Notifiers {
-					notifier.Notifier.Notify(fmt.Sprintf("check %s error: %s", cfgCheck.Name, err))
+					if err := notifier.Notifier.Notify(fmt.Sprintf("check %s error: %s", cfgCheck.Name, err)); err != nil {
+						log.Error().Err(err).Msg("failed notifying")
+					}
 				}
 			}
 			log.Info().Str("result", string(b)).Msg("check finished")
