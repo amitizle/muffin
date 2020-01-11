@@ -6,7 +6,7 @@ notifiers:
   - name: Slack notifier
     type: slack
     config:
-      token: "xoxp-748714176594-761494374373-902064336004-86eb483b5b21c790fffeb4e733fdaf4a"
+      token: "1234"
       channel_name: "general"
 checks:
   - name: Failing HTTP check
