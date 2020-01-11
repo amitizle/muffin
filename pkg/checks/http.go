@@ -3,6 +3,7 @@ package checks
 import (
 	"bytes"
 	"context"
+	"errors"
 	"fmt"
 	"io/ioutil"
 	"net/http"
@@ -106,7 +107,7 @@ func (check *HTTPCheck) Run() ([]byte, error) {
 	req, err := http.NewRequest(check.config.Method, check.config.parsedURL.String(), bytes.NewBuffer(check.config.Payload))
 	if err != nil {
 		check.logger.Error().Err(err).Msg("check encountered an error")
-		return []byte{}, err
+		return []byte{}, check.wrapError(err)
 	}
 
 	resp, err := check.client.Do(req)
@@ -114,18 +115,18 @@ func (check *HTTPCheck) Run() ([]byte, error) {
 	// check itself should be reporting an error, thus we won't return nil
 	if err != nil && resp == nil {
 		check.logger.Error().Err(err).Msg("check encountered an error")
-		return []byte{}, err
+		return []byte{}, check.wrapError(err)
 	}
 
 	defer resp.Body.Close()
 	body, err := ioutil.ReadAll(resp.Body)
 	if err != nil {
 		check.logger.Error().Err(err).Msg("check encountered an error")
-		return []byte{}, err
+		return []byte{}, check.wrapError(err)
 	}
 
 	if check.config.errorHTTPStatusCodesMap[resp.StatusCode] {
-		return body, fmt.Errorf(resp.Status)
+		return body, check.wrapError(errors.New(resp.Status))
 	}
 
 	return body, nil
@@ -134,4 +135,8 @@ func (check *HTTPCheck) Run() ([]byte, error) {
 // GetFullURL returns the string represantation of the check's URL
 func (check *HTTPCheck) GetFullURL() string {
 	return check.config.parsedURL.String()
+}
+
+func (check *HTTPCheck) wrapError(err error) error {
+	return fmt.Errorf("HTTP check failed to %s: %s", check.config.parsedURL.String(), err)
 }
