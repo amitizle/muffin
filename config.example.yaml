@@ -1,6 +1,13 @@
 ---
 log:
   level: debug
+
+notifiers:
+  - name: Slack notifier
+    type: slack
+    config:
+      token: "1234"
+      channel_name: "general"
 checks:
   - name: Failing HTTP check
     type: http
